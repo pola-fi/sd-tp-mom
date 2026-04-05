@@ -58,7 +58,17 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
     
     def __init__(self, host, exchange_name, routing_keys):
-        pass
+        self.host = host
+        self.exchange_name = exchange_name
+        self.routing_keys = routing_keys
+        self.connection = None
+        self.channel = None
+        try:
+            self.connection = pika.BlockingConnection(pika.ConnectionParameters(host))
+            self.channel = self.connection.channel()
+            self.channel.exchange_declare(exchange=self.exchange_name, exchange_type='fanout')
+        except Exception as exc:
+            raise MessageMiddlewareMessageError() from exc
 
     def start_consuming(self, on_message_callback):
         pass
@@ -70,4 +80,7 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
         pass
 
     def close(self):
-        pass
+        try:
+            self.connection.close()
+        except Exception as exc:
+            raise MessageMiddlewareCloseError() from exc
