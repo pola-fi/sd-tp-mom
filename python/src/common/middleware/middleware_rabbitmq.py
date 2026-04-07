@@ -63,22 +63,53 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
         self.routing_keys = routing_keys
         self.connection = None
         self.channel = None
+        self.queue_name = None
         try:
             self.connection = pika.BlockingConnection(pika.ConnectionParameters(host))
             self.channel = self.connection.channel()
-            self.channel.exchange_declare(exchange=self.exchange_name, exchange_type='fanout')
+            self.channel.exchange_declare(
+                exchange=self.exchange_name,
+                exchange_type="direct",
+                durable=False,
+            )
+            result = self.channel.queue_declare(queue="", exclusive=True)
+            self.queue_name = result.method.queue
+            for rk in self.routing_keys:
+                self.channel.queue_bind(
+                    queue=self.queue_name,
+                    exchange=self.exchange_name,
+                    routing_key=rk,
+                )
         except Exception as exc:
             raise MessageMiddlewareMessageError() from exc
 
     def start_consuming(self, on_message_callback):
-        pass
+        
+        def pika_callback(ch, method, properties, body):
+            def ack():
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+            def nack():
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            on_message_callback(body, ack, nack)
+
+        self.channel.basic_qos(prefetch_count=1)
+        self.channel.basic_consume(
+            queue=self.queue_name,
+            auto_ack=False,
+            on_message_callback=pika_callback,
+        )
+        self.channel.start_consuming()
 
     def stop_consuming(self):
-        pass
+        self.channel.stop_consuming()
 
     def send(self, message):
-        pass
-
+        self.channel.basic_publish(
+            exchange=self.exchange_name,
+            routing_key=self.routing_keys[0],
+            body=message,
+        )
+        
     def close(self):
         try:
             self.connection.close()
